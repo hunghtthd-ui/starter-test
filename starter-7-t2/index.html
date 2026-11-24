@@ -1,0 +1,821 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Interactive Drag & Drop Worksheet</title>
+    <!-- Tải Tailwind CSS để hỗ trợ bố cục linh hoạt và responsive -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        /* Thiết lập cơ bản ngăn cuộn trang ngoài ý muốn khi kéo thả trên mobile */
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background-color: #f1f5f9;
+            touch-action: none;
+            user-select: none;
+            -webkit-user-select: none;
+            font-family: system-ui, -apple-system, sans-serif;
+        }
+
+        /* Khung chứa toàn màn hình */
+        #app-wrapper {
+            width: 100vw;
+            height: 100vh;
+            display: flex;
+            flex-direction: row;
+            align-items: center;
+            justify-content: center;
+            padding: 12px;
+            box-sizing: border-box;
+            gap: 16px;
+        }
+
+        /* Khu vực chứa 8 flashcards bên trái */
+        #flashcards-sidebar {
+            width: 22%;
+            min-width: 170px;
+            max-width: 260px;
+            height: 100%;
+            max-height: 720px;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 4px 10px -2px rgba(0, 0, 0, 0.04);
+            padding: 12px;
+            box-sizing: border-box;
+            display: grid;
+            grid-template-columns: repeat(2, 1fr);
+            grid-template-rows: repeat(4, 1fr);
+            gap: 10px;
+            border: 2px solid #e2e8f0;
+            z-index: 10;
+        }
+
+        /* Ô chứa ban đầu của từng flashcard */
+        .card-slot {
+            width: 100%;
+            height: 100%;
+            background-color: #f8fafc;
+            border: 1.5px dashed #cbd5e1;
+            border-radius: 10px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        /* Thẻ Flashcard có thể kéo thả */
+        .flashcard {
+            width: 100%;
+            height: 100%;
+            background-color: #fef9c3; /* Nền vàng nhạt giống thẻ gốc */
+            border: 1.5px dashed #64748b;
+            border-radius: 8px;
+            box-shadow: 0 2px 6px rgba(0, 0, 0, 0.12);
+            cursor: grab;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            padding: 4px;
+            box-sizing: border-box;
+            transition: transform 0.15s ease, box-shadow 0.15s ease;
+            touch-action: none;
+            position: relative;
+        }
+
+        .flashcard:hover, .flashcard:focus {
+            transform: scale(1.04);
+            box-shadow: 0 8px 16px rgba(0, 0, 0, 0.18);
+            outline: 2px solid #3b82f6;
+            z-index: 30;
+        }
+
+        /* Trạng thái đang được kéo */
+        .flashcard.dragging {
+            cursor: grabbing;
+            transform: scale(1.12);
+            box-shadow: 0 16px 32px rgba(0, 0, 0, 0.28);
+            z-index: 9999 !important;
+            transition: none;
+            opacity: 0.96;
+        }
+
+        /* Trạng thái đã được thả vào bức tranh chính */
+        .flashcard.placed {
+            position: fixed;
+            width: clamp(64px, 7.5vw, 105px);
+            height: clamp(64px, 7.5vw, 105px);
+            z-index: 50;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.22);
+        }
+
+        .flashcard svg {
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+        }
+
+        /* Khu vực bức tranh chính bên phải */
+        #scene-container {
+            flex: 1;
+            height: 100%;
+            max-height: 720px;
+            max-width: 1080px;
+            background: #ffffff;
+            border-radius: 16px;
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.08), 0 4px 10px -2px rgba(0, 0, 0, 0.04);
+            border: 2px solid #cbd5e1;
+            overflow: hidden;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            position: relative;
+        }
+
+        #main-scene-svg {
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+            display: block;
+        }
+      <div class="scene-stage" id="sceneStage">
+  <img src="./scene.jpg" alt="Room scene" class="scene-bg-image" />
+
+        /* Tối ưu hóa bố cục cho màn hình điện thoại (dọc & ngang nhỏ) */
+        @media (max-width: 768px) {
+            #app-wrapper {
+                flex-direction: column-reverse;
+                padding: 8px;
+                gap: 8px;
+            }
+
+            #flashcards-sidebar {
+                width: 100%;
+                max-width: 100%;
+                height: 28%;
+                min-height: 145px;
+                grid-template-columns: repeat(4, 1fr);
+                grid-template-rows: repeat(2, 1fr);
+                padding: 8px;
+                gap: 6px;
+            }
+
+            #scene-container {
+                width: 100%;
+                height: 72%;
+            }
+
+            .flashcard.placed {
+                width: clamp(50px, 13vw, 76px);
+                height: clamp(50px, 13vw, 76px);
+            }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Giao diện tối giản tuyệt đối: Chỉ hiển thị 8 flashcards và bức tranh chính -->
+    <main id="app-wrapper" aria-label="Bài tập kéo thả tương tác">
+        
+        <!-- Cột trái: 8 Flashcards (Không chữ, phục vụ kiểm tra nghe & từ vựng) -->
+        <aside id="flashcards-sidebar" aria-label="Danh sách thẻ hình">
+            <!-- 1. Gương (Mirror) -->
+            <div class="card-slot" data-slot="0">
+                <div class="flashcard" id="card-mirror" tabindex="0" role="button" aria-label="Thẻ hình 1">
+                    <svg viewBox="0 0 100 100">
+                        <path d="M50 6 L46 13 M50 6 L54 13" stroke="#64748b" stroke-width="2" fill="none"/>
+                        <circle cx="50" cy="6" r="2" fill="#64748b"/>
+                        <!-- Khung gương vàng uốn lượn -->
+                        <path d="M22 15 Q30 10 38 15 Q50 10 62 15 Q70 10 78 15 Q85 25 80 35 Q86 50 80 65 Q85 75 78 85 Q70 90 62 85 Q50 90 38 85 Q30 90 22 85 Q15 75 20 65 Q14 50 20 35 Q15 25 22 15 Z" fill="#fbbf24" stroke="#b45309" stroke-width="2"/>
+                        <!-- Mặt gương phản chiếu -->
+                        <rect x="27" y="22" width="46" height="56" rx="2" fill="#e0f2fe" stroke="#0284c7" stroke-width="1.5"/>
+                        <polygon points="28,45 55,23 68,23 28,60" fill="#ffffff" opacity="0.7"/>
+                        <polygon points="36,77 72,45 72,62 52,77" fill="#ffffff" opacity="0.5"/>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- 2. Đèn bàn (Lamp) -->
+            <div class="card-slot" data-slot="1">
+                <div class="flashcard" id="card-lamp" tabindex="0" role="button" aria-label="Thẻ hình 2">
+                    <svg viewBox="0 0 100 100">
+                        <!-- Đế đèn -->
+                        <ellipse cx="42" cy="88" rx="18" ry="5" fill="#60a5fa" stroke="#1e3a8a" stroke-width="2"/>
+                        <rect x="24" y="83" width="36" height="5" fill="#3b82f6" stroke="#1e3a8a" stroke-width="1.5"/>
+                        <!-- Thân đèn khớp nối -->
+                        <line x1="40" y1="83" x2="32" y2="50" stroke="#1e3a8a" stroke-width="4" stroke-linecap="round"/>
+                        <line x1="44" y1="83" x2="36" y2="50" stroke="#60a5fa" stroke-width="3" stroke-linecap="round"/>
+                        <circle cx="34" cy="49" r="4" fill="#2563eb" stroke="#1e3a8a" stroke-width="1.5"/>
+                        <line x1="34" y1="49" x2="42" y2="16" stroke="#1e3a8a" stroke-width="4" stroke-linecap="round"/>
+                        <line x1="38" y1="49" x2="45" y2="16" stroke="#60a5fa" stroke-width="3" stroke-linecap="round"/>
+                        <circle cx="44" cy="15" r="4" fill="#2563eb" stroke="#1e3a8a" stroke-width="1.5"/>
+                        <!-- Chụp đèn -->
+                        <line x1="44" y1="15" x2="64" y2="28" stroke="#1e3a8a" stroke-width="3"/>
+                        <path d="M56 26 L74 22 L86 46 L52 52 Z" fill="#60a5fa" stroke="#1e3a8a" stroke-width="2" stroke-linejoin="round"/>
+                        <ellipse cx="69" cy="49" rx="17" ry="5" transform="rotate(-10 69 49)" fill="#eff6ff" stroke="#1e3a8a" stroke-width="1.5"/>
+                        <circle cx="68" cy="47" r="4" fill="#fef08a" stroke="#ca8a04" stroke-width="1"/>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- 3. Thước kẻ (Ruler) -->
+            <div class="card-slot" data-slot="2">
+                <div class="flashcard" id="card-ruler" tabindex="0" role="button" aria-label="Thẻ hình 3">
+                    <svg viewBox="0 0 100 100">
+                        <g transform="rotate(-45 50 50)">
+                            <rect x="6" y="40" width="88" height="20" rx="2" fill="#cbd5e1" stroke="#334155" stroke-width="2"/>
+                            <rect x="8" y="42" width="84" height="8" fill="#e2e8f0" opacity="0.6"/>
+                            <!-- Vạch chia độ -->
+                            <line x1="14" y1="40" x2="14" y2="49" stroke="#334155" stroke-width="1.5"/>
+                            <line x1="20" y1="40" x2="20" y2="46" stroke="#334155" stroke-width="1.2"/>
+                            <line x1="26" y1="40" x2="26" y2="49" stroke="#334155" stroke-width="1.5"/>
+                            <line x1="32" y1="40" x2="32" y2="46" stroke="#334155" stroke-width="1.2"/>
+                            <line x1="38" y1="40" x2="38" y2="49" stroke="#334155" stroke-width="1.5"/>
+                            <line x1="44" y1="40" x2="44" y2="46" stroke="#334155" stroke-width="1.2"/>
+                            <line x1="50" y1="40" x2="50" y2="51" stroke="#334155" stroke-width="1.8"/>
+                            <line x1="56" y1="40" x2="56" y2="46" stroke="#334155" stroke-width="1.2"/>
+                            <line x1="62" y1="40" x2="62" y2="49" stroke="#334155" stroke-width="1.5"/>
+                            <line x1="68" y1="40" x2="68" y2="46" stroke="#334155" stroke-width="1.2"/>
+                            <line x1="74" y1="40" x2="74" y2="49" stroke="#334155" stroke-width="1.5"/>
+                            <line x1="80" y1="40" x2="80" y2="46" stroke="#334155" stroke-width="1.2"/>
+                            <line x1="86" y1="40" x2="86" y2="49" stroke="#334155" stroke-width="1.5"/>
+                        </g>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- 4. Chùm nho xanh (Grapes) -->
+            <div class="card-slot" data-slot="3">
+                <div class="flashcard" id="card-grapes" tabindex="0" role="button" aria-label="Thẻ hình 4">
+                    <svg viewBox="0 0 100 100">
+                        <!-- Cuống nho -->
+                        <path d="M58 26 Q68 16 78 12" stroke="#78350f" stroke-width="3.5" fill="none" stroke-linecap="round"/>
+                        <!-- Các quả nho xanh -->
+                        <g fill="#86efac" stroke="#15803d" stroke-width="1.6">
+                            <circle cx="48" cy="28" r="8"/>
+                            <circle cx="60" cy="30" r="8"/>
+                            <circle cx="40" cy="38" r="8"/>
+                            <circle cx="52" cy="40" r="8.5"/>
+                            <circle cx="64" cy="42" r="8"/>
+                            <circle cx="35" cy="50" r="8"/>
+                            <circle cx="47" cy="52" r="8.5"/>
+                            <circle cx="59" cy="54" r="8"/>
+                            <circle cx="32" cy="62" r="8"/>
+                            <circle cx="44" cy="64" r="8.5"/>
+                            <circle cx="54" cy="66" r="8"/>
+                            <circle cx="30" cy="74" r="7.5"/>
+                            <circle cx="41" cy="76" r="8"/>
+                            <circle cx="33" cy="85" r="7.5"/>
+                        </g>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- 5. Đài Radio (Radio) -->
+            <div class="card-slot" data-slot="4">
+                <div class="flashcard" id="card-radio" tabindex="0" role="button" aria-label="Thẻ hình 5">
+                    <svg viewBox="0 0 100 100">
+                        <!-- Ăng-ten -->
+                        <line x1="74" y1="42" x2="88" y2="12" stroke="#475569" stroke-width="2.5" stroke-linecap="round"/>
+                        <circle cx="88" cy="12" r="2.5" fill="#475569"/>
+                        <!-- Tay cầm -->
+                        <path d="M26 42 Q50 28 74 42" stroke="#475569" stroke-width="4" fill="none" stroke-linecap="round"/>
+                        <!-- Thân máy -->
+                        <rect x="14" y="42" width="72" height="44" rx="5" fill="#f8fafc" stroke="#334155" stroke-width="2"/>
+                        <!-- Màn hình hiển thị -->
+                        <rect x="20" y="48" width="24" height="8" rx="1.5" fill="#a7f3d0" stroke="#059669" stroke-width="1.2"/>
+                        <!-- Loa tròn bên phải -->
+                        <circle cx="68" cy="65" r="14" fill="#cbd5e1" stroke="#475569" stroke-width="1.8"/>
+                        <circle cx="68" cy="65" r="10" fill="none" stroke="#64748b" stroke-width="1" stroke-dasharray="2 2"/>
+                        <!-- Các nút bấm & núm xoay -->
+                        <circle cx="24" cy="65" r="3.5" fill="#e2e8f0" stroke="#475569" stroke-width="1.2"/>
+                        <circle cx="24" cy="76" r="3.5" fill="#e2e8f0" stroke="#475569" stroke-width="1.2"/>
+                        <rect x="33" y="61" width="12" height="18" rx="2" fill="#e2e8f0" stroke="#64748b" stroke-width="1"/>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- 6. Cà rốt (Carrots) -->
+            <div class="card-slot" data-slot="5">
+                <div class="flashcard" id="card-carrots" tabindex="0" role="button" aria-label="Thẻ hình 6">
+                    <svg viewBox="0 0 100 100">
+                        <!-- Lá xanh -->
+                        <g stroke="#15803d" stroke-width="2" fill="#22c55e" stroke-linecap="round">
+                            <path d="M62 32 Q72 16 84 14 Q74 24 68 35 Z"/>
+                            <path d="M65 36 Q82 24 92 26 Q78 34 69 40 Z"/>
+                            <path d="M74 48 Q88 38 94 44 Q82 48 76 53 Z"/>
+                        </g>
+                        <!-- 3 củ cà rốt -->
+                        <g fill="#f97316" stroke="#9a3412" stroke-width="1.6" stroke-linejoin="round">
+                            <path d="M58 28 Q66 32 62 40 L20 68 Q16 66 20 61 Z"/>
+                            <path d="M66 36 Q74 40 70 49 L26 80 Q22 78 26 73 Z"/>
+                            <path d="M72 48 Q80 53 75 62 L32 90 Q28 88 32 83 Z"/>
+                        </g>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- 7. Hộp trứng (Eggs) -->
+            <div class="card-slot" data-slot="6">
+                <div class="flashcard" id="card-eggs" tabindex="0" role="button" aria-label="Thẻ hình 7">
+                    <svg viewBox="0 0 100 100">
+                        <!-- Nắp hộp mở -->
+                        <rect x="24" y="14" width="52" height="34" rx="6" fill="#e2e8f0" stroke="#475569" stroke-width="1.8"/>
+                        <rect x="42" y="10" width="16" height="4" rx="1" fill="#cbd5e1" stroke="#475569" stroke-width="1.5"/>
+                        <!-- Khay đựng trứng -->
+                        <polygon points="18,52 82,52 76,88 24,88" fill="#cbd5e1" stroke="#475569" stroke-width="1.8" stroke-linejoin="round"/>
+                        <!-- 6 quả trứng (hàng trên & hàng dưới) -->
+                        <ellipse cx="33" cy="54" rx="8" ry="11" fill="#fed7aa" stroke="#9a3412" stroke-width="1.5"/>
+                        <ellipse cx="50" cy="54" rx="8" ry="11" fill="#fdba74" stroke="#9a3412" stroke-width="1.5"/>
+                        <ellipse cx="67" cy="54" rx="8" ry="11" fill="#d97706" stroke="#78350f" stroke-width="1.5"/>
+                        <ellipse cx="33" cy="68" rx="8.5" ry="11.5" fill="#ffedd5" stroke="#9a3412" stroke-width="1.5"/>
+                        <ellipse cx="50" cy="68" rx="8.5" ry="11.5" fill="#d97706" stroke="#78350f" stroke-width="1.5"/>
+                        <ellipse cx="67" cy="68" rx="8.5" ry="11.5" fill="#fed7aa" stroke="#9a3412" stroke-width="1.5"/>
+                        <!-- Viền khay phía trước -->
+                        <path d="M18 68 Q33 78 50 72 Q67 78 82 68 L76 88 L24 88 Z" fill="#e2e8f0" stroke="#475569" stroke-width="1.6"/>
+                    </svg>
+                </div>
+            </div>
+
+            <!-- 8. Vợt Tennis & Bóng (Tennis Rackets) -->
+            <div class="card-slot" data-slot="7">
+                <div class="flashcard" id="card-tennis" tabindex="0" role="button" aria-label="Thẻ hình 8">
+                    <svg viewBox="0 0 100 100">
+                        <!-- Sân cỏ xanh & lưới -->
+                        <rect x="6" y="54" width="88" height="40" fill="#4ade80"/>
+                        <line x1="6" y1="54" x2="94" y2="54" stroke="#ffffff" stroke-width="3"/>
+                        <line x1="6" y1="62" x2="94" y2="62" stroke="#166534" stroke-width="1"/>
+                        <line x1="6" y1="70" x2="94" y2="70" stroke="#166534" stroke-width="1"/>
+                        <line x1="6" y1="78" x2="94" y2="78" stroke="#166534" stroke-width="1"/>
+                        <!-- Vợt 1 (nghiêng trái) -->
+                        <g transform="rotate(-38 45 52)">
+                            <ellipse cx="45" cy="30" rx="16" ry="22" fill="none" stroke="#1d4ed8" stroke-width="3"/>
+                            <line x1="45" y1="52" x2="45" y2="88" stroke="#1e293b" stroke-width="4.5" stroke-linecap="round"/>
+                        </g>
+                        <!-- Vợt 2 (nghiêng phải) -->
+                        <g transform="rotate(38 55 52)">
+                            <ellipse cx="55" cy="30" rx="16" ry="22" fill="none" stroke="#1d4ed8" stroke-width="3"/>
+                            <line x1="55" y1="52" x2="55" y2="88" stroke="#1e293b" stroke-width="4.5" stroke-linecap="round"/>
+                        </g>
+                        <!-- Quả bóng tennis vàng -->
+                        <circle cx="50" cy="32" r="7" fill="#bef264" stroke="#4d7c0f" stroke-width="1.5"/>
+                        <path d="M45 27 Q50 32 45 37" fill="none" stroke="#ffffff" stroke-width="1.2"/>
+                    </svg>
+                </div>
+            </div>
+        </aside>
+
+        <!-- Khung bên phải: Bức tranh cảnh gia đình trong phòng ăn -->
+        <section id="scene-container" aria-label="Bức tranh bối cảnh">
+            <svg id="main-scene-svg" viewBox="0 0 900 600" preserveAspectRatio="xMidYMid meet">
+                <!-- 1. Tường phòng màu vàng kem & Sàn nhà trải thảm xanh dương -->
+                <rect x="0" y="0" width="900" height="375" fill="#fef9c3"/>
+                <rect x="0" y="375" width="900" height="225" fill="#93c5fd"/>
+                <line x1="0" y1="375" x2="900" y2="375" stroke="#64748b" stroke-width="2"/>
+
+                <!-- 2. Đồng hồ treo tường góc trên bên trái -->
+                <g transform="translate(85, 62)">
+                    <circle cx="0" cy="0" r="38" fill="#dbeafe" stroke="#475569" stroke-width="2.5"/>
+                    <circle cx="0" cy="0" r="32" fill="#ffffff" stroke="#64748b" stroke-width="1.5"/>
+                    <!-- Các vạch số đồng hồ -->
+                    <line x1="0" y1="-28" x2="0" y2="-23" stroke="#1e293b" stroke-width="2"/>
+                    <line x1="28" y1="0" x2="23" y2="0" stroke="#1e293b" stroke-width="2"/>
+                    <line x1="0" y1="28" x2="0" y2="23" stroke="#1e293b" stroke-width="2"/>
+                    <line x1="-28" y1="0" x2="-23" y2="0" stroke="#1e293b" stroke-width="2"/>
+                    <!-- Kim giờ & kim phút -->
+                    <line x1="0" y1="0" x2="-3" y2="-22" stroke="#1e293b" stroke-width="2.2" stroke-linecap="round"/>
+                    <line x1="0" y1="0" x2="9" y2="14" stroke="#1e293b" stroke-width="2.8" stroke-linecap="round"/>
+                    <circle cx="0" cy="0" r="3" fill="#1e293b"/>
+                </g>
+
+                <!-- 3. Cửa sổ lớn bên phải nhìn ra ngoài trời -->
+                <g id="window-group">
+                    <!-- Khung cửa sổ -->
+                    <rect x="485" y="6" width="320" height="214" fill="#e0f2fe" stroke="#64748b" stroke-width="3"/>
+                    <!-- Mặt trời & Máy bay trên bầu trời -->
+                    <circle cx="745" cy="24" r="10" fill="#fde047" stroke="#ca8a04" stroke-width="1.5"/>
+                    <!-- Máy bay -->
+                    <g transform="translate(540, 26)">
+                        <path d="M0 10 L10 0 L16 10 L55 8 Q68 8 72 13 Q68 17 55 17 L12 17 Z" fill="#f8fafc" stroke="#475569" stroke-width="1.5"/>
+                        <polygon points="30,13 42,22 48,13" fill="#cbd5e1" stroke="#475569" stroke-width="1.2"/>
+                    </g>
+                    <!-- Hàng rào gỗ, bụi cây & bãi cỏ xanh ngoài cửa sổ -->
+                    <rect x="488" y="138" width="314" height="18" fill="#d97706" stroke="#78350f" stroke-width="1.5"/>
+                    <rect x="488" y="156" width="314" height="61" fill="#86efac"/>
+                    <!-- Cây thông xanh bên phải cửa sổ -->
+                    <path d="M700 215 L715 150 L705 150 L730 95 L720 95 L748 45 L772 95 L762 95 L785 150 L775 150 L792 215 Z" fill="#4ade80" stroke="#15803d" stroke-width="1.5"/>
+                    <!-- Bụi cây bên trái -->
+                    <path d="M488 138 Q515 110 545 138 Z" fill="#22c55e" stroke="#15803d" stroke-width="1.5"/>
+                    <!-- Thanh chia khung cửa sổ -->
+                    <rect x="640" y="6" width="12" height="214" fill="#ffffff" stroke="#64748b" stroke-width="2"/>
+                    <rect x="478" y="216" width="334" height="10" fill="#ffffff" stroke="#64748b" stroke-width="2"/>
+                    <!-- Rèm cửa màu nâu đỏ hai bên -->
+                    <rect x="445" y="6" width="40" height="216" fill="#991b1b" stroke="#450a0a" stroke-width="1.5"/>
+                    <rect x="805" y="6" width="40" height="216" fill="#991b1b" stroke="#450a0a" stroke-width="1.5"/>
+                </g>
+
+                <!-- 4. Ghế & Người bố ngồi ăn (Phía sau bàn) -->
+                <g id="dad-group">
+                    <!-- Thành ghế sau lưng bố -->
+                    <rect x="218" y="215" width="94" height="110" fill="#d97706" stroke="#78350f" stroke-width="2"/>
+                    <line x1="218" y1="245" x2="312" y2="245" stroke="#78350f" stroke-width="3"/>
+                    <!-- Chân bố dưới gầm bàn -->
+                    <rect x="215" y="340" width="36" height="115" fill="#334155" stroke="#0f172a" stroke-width="2"/>
+                    <rect x="278" y="340" width="36" height="115" fill="#334155" stroke="#0f172a" stroke-width="2"/>
+                    <!-- Giày bố -->
+                    <ellipse cx="222" cy="462" rx="22" ry="10" fill="#991b1b" stroke="#450a0a" stroke-width="2"/>
+                    <ellipse cx="305" cy="462" rx="22" ry="10" fill="#991b1b" stroke="#450a0a" stroke-width="2"/>
+                    <!-- Áo xanh dương của bố -->
+                    <path d="M210 200 Q265 180 320 200 L338 280 L305 315 L225 315 L195 275 Z" fill="#3b82f6" stroke="#1e3a8a" stroke-width="2"/>
+                    <!-- Đầu & khuôn mặt bố -->
+                    <ellipse cx="268" cy="148" rx="28" ry="36" fill="#fed7aa" stroke="#9a3412" stroke-width="2"/>
+                    <path d="M238 135 Q236 105 268 102 Q298 105 296 135 Q286 120 268 122 Q248 120 238 135 Z" fill="#78350f"/>
+                    <!-- Mắt, mũi, miệng & ly nước bố đang uống -->
+                    <circle cx="258" cy="142" r="2.2" fill="#1e293b"/>
+                    <circle cx="278" cy="142" r="2.2" fill="#1e293b"/>
+                    <polygon points="256,162 280,162 276,192 260,192" fill="#dbeafe" stroke="#2563eb" stroke-width="1.8"/>
+                </g>
+
+                <!-- 5. Ghế trống ở giữa phía sau bàn -->
+                <g id="empty-chair-back">
+                    <rect x="366" y="215" width="96" height="225" fill="none" stroke="#78350f" stroke-width="2"/>
+                    <rect x="366" y="215" width="96" height="24" fill="#d97706" stroke="#78350f" stroke-width="2"/>
+                    <rect x="366" y="265" width="96" height="16" fill="#d97706" stroke="#78350f" stroke-width="2"/>
+                    <rect x="366" y="310" width="96" height="16" fill="#d97706" stroke="#78350f" stroke-width="2"/>
+                    <rect x="366" y="215" width="10" height="225" fill="#d97706" stroke="#78350f" stroke-width="2"/>
+                    <rect x="452" y="215" width="10" height="225" fill="#d97706" stroke="#78350f" stroke-width="2"/>
+                </g>
+
+                <!-- 6. Ghế bên phải bàn ăn -->
+                <g id="right-chair">
+                    <polygon points="560,225 600,235 568,465 554,465 572,335 478,335 478,440 466,440 466,320 574,320" fill="#d97706" stroke="#78350f" stroke-width="2"/>
+                    <polygon points="472,320 574,320 574,332 472,332" fill="#dc2626" stroke="#7f1d1d" stroke-width="1.5"/>
+                </g>
+
+                <!-- 7. Bàn ăn lớn & Thức ăn trên bàn -->
+                <g id="dining-table">
+                    <!-- Chân bàn -->
+                    <rect x="115" y="345" width="12" height="155" fill="#d97706" stroke="#78350f" stroke-width="2"/>
+                    <rect x="502" y="345" width="12" height="155" fill="#d97706" stroke="#78350f" stroke-width="2"/>
+                    <!-- Mặt bàn -->
+                    <polygon points="150,262 485,262 536,332 98,332" fill="#fde68a" stroke="#78350f" stroke-width="2.5"/>
+                    <rect x="98" y="332" width="438" height="16" fill="#f59e0b" stroke="#78350f" stroke-width="2"/>
+                    
+                    <!-- 4 Đĩa thức ăn nóng hổi -->
+                    <g fill="#ffffff" stroke="#64748b" stroke-width="1.5">
+                        <ellipse cx="172" cy="296" rx="34" ry="11"/>
+                        <ellipse cx="275" cy="278" rx="34" ry="11"/>
+                        <ellipse cx="408" cy="278" rx="34" ry="11"/>
+                        <ellipse cx="485" cy="298" rx="34" ry="11"/>
+                    </g>
+                    <!-- Thức ăn trên đĩa -->
+                    <g fill="#f59e0b" stroke="#92400e" stroke-width="1.2">
+                        <path d="M152 294 Q172 280 192 294 Z"/>
+                        <path d="M255 276 Q275 262 295 276 Z"/>
+                        <path d="M388 276 Q408 262 428 276 Z"/>
+                        <path d="M465 296 Q485 282 505 296 Z"/>
+                    </g>
+                    <!-- Bát cam ở giữa bàn -->
+                    <path d="M332 292 Q368 332 404 292 Z" fill="#e2e8f0" stroke="#475569" stroke-width="1.8"/>
+                    <circle cx="352" cy="288" r="12" fill="#fb923c" stroke="#9a3412" stroke-width="1.5"/>
+                    <circle cx="370" cy="284" r="12" fill="#f97316" stroke="#9a3412" stroke-width="1.5"/>
+                    <circle cx="386" cy="288" r="12" fill="#fb923c" stroke="#9a3412" stroke-width="1.5"/>
+                    <!-- Các cốc nước trên bàn -->
+                    <g fill="#dbeafe" stroke="#2563eb" stroke-width="1.5">
+                        <polygon points="214,295 234,295 231,322 217,322"/>
+                        <polygon points="348,255 366,255 364,278 350,278"/>
+                        <polygon points="442,296 462,296 459,324 445,324"/>
+                    </g>
+                </g>
+
+                <!-- 8. Bé gái ngồi bên trái bàn ăn & Điện thoại rơi dưới ghế -->
+                <g id="girl-group">
+                    <!-- Ghế bé gái -->
+                    <polygon points="15,218 55,210 85,465 72,465 55,342 150,342 150,455 138,455 138,354 52,354" fill="#d97706" stroke="#78350f" stroke-width="2"/>
+                    <!-- Quần xanh nhạt & Tất trắng -->
+                    <path d="M58 318 L138 335 L168 430 L142 436 L112 362 L58 352 Z" fill="#bae6fd" stroke="#0369a1" stroke-width="2"/>
+                    <ellipse cx="165" cy="442" rx="18" ry="8" transform="rotate(20 165 442)" fill="#ffffff" stroke="#64748b" stroke-width="1.8"/>
+                    <ellipse cx="184" cy="432" rx="18" ry="8" transform="rotate(15 184 432)" fill="#ffffff" stroke="#64748b" stroke-width="1.8"/>
+                    <!-- Áo hồng của bé gái -->
+                    <path d="M72 252 Q105 245 122 275 L155 292 L148 308 L108 296 L95 335 L52 330 Q50 280 72 252 Z" fill="#f472b6" stroke="#9d174d" stroke-width="2"/>
+                    <!-- Đầu & tóc đuôi ngựa -->
+                    <circle cx="115" cy="232" r="24" fill="#fed7aa" stroke="#9a3412" stroke-width="2"/>
+                    <path d="M92 225 Q95 198 122 202 Q142 206 140 232 Q128 218 112 220 Z" fill="#78350f"/>
+                    <path d="M90 212 Q62 182 56 238 Q72 246 84 222 Z" fill="#78350f" stroke="#451a03" stroke-width="1.5"/>
+                    <circle cx="91" cy="214" r="5" fill="#ec4899"/>
+                    <!-- Dây tai nghe & Máy nghe nhạc/Điện thoại rơi dưới gầm ghế -->
+                    <path d="M62 332 Q50 385 68 432" fill="none" stroke="#475569" stroke-width="1.5"/>
+                    <g transform="translate(55, 442) rotate(-32)">
+                        <rect x="0" y="0" width="26" height="15" rx="3" fill="#f87171" stroke="#7f1d1d" stroke-width="1.5"/>
+                        <rect x="4" y="3" width="12" height="9" fill="#e2e8f0"/>
+                    </g>
+                </g>
+
+                <!-- 9. Người mẹ đứng chỉ tay vào bàn ăn -->
+                <g id="mom-group">
+                    <!-- Chân & Dép hồng -->
+                    <rect x="622" y="425" width="16" height="75" fill="#fed7aa" stroke="#9a3412" stroke-width="1.8"/>
+                    <rect x="656" y="425" width="16" height="75" fill="#fed7aa" stroke="#9a3412" stroke-width="1.8"/>
+                    <ellipse cx="626" cy="510" rx="22" ry="9" fill="#f472b6" stroke="#9d174d" stroke-width="1.8"/>
+                    <ellipse cx="666" cy="510" rx="22" ry="9" fill="#f472b6" stroke="#9d174d" stroke-width="1.8"/>
+                    <!-- Váy nâu -->
+                    <polygon points="602,272 686,272 722,428 564,428" fill="#92400e" stroke="#451a03" stroke-width="2"/>
+                    <!-- Áo hồng nhạt & Cánh tay trái chỉ sang bàn -->
+                    <path d="M608 152 Q645 136 680 152 L726 210 L692 252 L684 272 L604 272 L606 196 L534 218 L528 202 Z" fill="#fbcfe8" stroke="#be185d" stroke-width="2"/>
+                    <!-- Bàn tay chỉ trỏ -->
+                    <path d="M528 205 L494 215 L496 220 L520 218 L524 224 L536 216 Z" fill="#fed7aa" stroke="#9a3412" stroke-width="1.5"/>
+                    <!-- Đầu & Tóc nâu ngang vai -->
+                    <path d="M610 112 Q610 72 644 72 Q678 72 678 112 L682 148 L606 148 Z" fill="#991b1b" stroke="#450a0a" stroke-width="1.8"/>
+                    <ellipse cx="644" cy="116" rx="22" ry="28" fill="#fed7aa" stroke="#9a3412" stroke-width="2"/>
+                    <circle cx="636" cy="110" r="2" fill="#1e293b"/>
+                    <circle cx="652" cy="110" r="2" fill="#1e293b"/>
+                    <path d="M636 128 Q644 136 652 128" fill="none" stroke="#9a3412" stroke-width="2"/>
+                </g>
+
+                <!-- 10. Bé trai ngồi bàn máy tính góc dưới bên phải -->
+                <g id="boy-computer-group">
+                    <!-- Bàn máy tính -->
+                    <polygon points="755,365 898,365 898,380 755,380" fill="#fde68a" stroke="#78350f" stroke-width="2"/>
+                    <rect x="768" y="380" width="10" height="175" fill="#cbd5e1" stroke="#475569" stroke-width="2"/>
+                    <rect x="882" y="380" width="10" height="175" fill="#cbd5e1" stroke="#475569" stroke-width="2"/>
+                    <line x1="778" y1="538" x2="882" y2="538" stroke="#475569" stroke-width="4"/>
+
+                    <!-- Màn hình máy tính & Bàn phím -->
+                    <rect x="854" y="232" width="16" height="112" rx="3" fill="#e2e8f0" stroke="#475569" stroke-width="2"/>
+                    <rect x="844" y="352" width="38" height="12" fill="#cbd5e1" stroke="#475569" stroke-width="1.8"/>
+                    <polygon points="794,352 838,352 844,364 788,364" fill="#f8fafc" stroke="#475569" stroke-width="1.8"/>
+                    <!-- Hộp bút màu đỏ trên bàn & Bút chì xanh rơi dưới sàn -->
+                    <rect x="782" y="370" width="76" height="16" rx="4" fill="#ef4444" stroke="#7f1d1d" stroke-width="1.8"/>
+                    <rect x="782" y="376" width="76" height="4" fill="#1e293b"/>
+                    <!-- Các bút chì rơi -->
+                    <g fill="#22c55e" stroke="#14532d" stroke-width="1.2">
+                        <rect x="822" y="402" width="24" height="5" transform="rotate(65 822 402)"/>
+                        <rect x="828" y="452" width="24" height="5" transform="rotate(35 828 452)"/>
+                        <rect x="824" y="492" width="24" height="5" transform="rotate(15 824 492)"/>
+                        <rect x="762" y="558" width="24" height="5" transform="rotate(-10 762 558)"/>
+                        <rect x="795" y="568" width="24" height="5" transform="rotate(-12 795 568)"/>
+                    </g>
+
+                    <!-- Quần dài xanh đậm & Tất xám của bé trai -->
+                    <path d="M685 415 L778 415 L805 510 L776 516 L752 448 L685 448 Z" fill="#3b82f6" stroke="#1e3a8a" stroke-width="2"/>
+                    <ellipse cx="798" cy="524" rx="22" ry="9" transform="rotate(20 798 524)" fill="#94a3b8" stroke="#334155" stroke-width="1.8"/>
+                    <!-- Áo phông xanh da trời -->
+                    <path d="M695 292 Q732 282 756 312 L802 342 L794 356 L748 342 L746 415 L685 415 Q680 340 695 292 Z" fill="#7dd3fc" stroke="#0369a1" stroke-width="2"/>
+                    <!-- Đầu bé trai -->
+                    <circle cx="744" cy="264" r="26" fill="#fed7aa" stroke="#9a3412" stroke-width="2"/>
+                    <path d="M716 266 Q716 232 748 232 Q776 234 774 262 Q756 250 742 258 Q732 272 716 266 Z" fill="#92400e"/>
+
+                    <!-- Ghế xoay văn phòng màu đỏ -->
+                    <rect x="665" y="315" width="32" height="115" rx="10" fill="#dc2626" stroke="#7f1d1d" stroke-width="2"/>
+                    <rect x="668" y="426" width="84" height="18" rx="6" fill="#dc2626" stroke="#7f1d1d" stroke-width="2"/>
+                    <rect x="716" y="444" width="12" height="75" fill="#1e293b"/>
+                    <path d="M722 518 L665 552 M722 518 L722 562 M722 518 L788 552" stroke="#1e293b" stroke-width="6" stroke-linecap="round"/>
+                    <circle cx="662" cy="558" r="7" fill="#0f172a"/>
+                    <circle cx="722" cy="568" r="7" fill="#0f172a"/>
+                    <circle cx="792" cy="558" r="7" fill="#0f172a"/>
+                </g>
+
+                <!-- Viền khung tranh tổng thể -->
+                <rect x="2" y="2" width="896" height="596" fill="none" stroke="#334155" stroke-width="4"/>
+            </svg>
+        </section>
+
+    </main>
+
+    <script>
+        /**
+         * Logic Kéo & Thả (Drag & Drop) đa nền tảng:
+         * - Hỗ trợ Chuột (Mouse Events)
+         * - Hỗ trợ Cảm ứng trên điện thoại/máy tính bảng (Pointer / Touch Events)
+         * - Hỗ trợ Bàn phím (Phím mũi tên để di chuyển tinh chỉnh, Enter/Space để chọn hoặc đặt thẻ)
+         * - Không hiển thị bất kỳ thông báo đúng/sai hay nút bấm thừa nào theo yêu cầu.
+         */
+        (function () {
+            'use strict';
+
+            const cards = document.querySelectorAll('.flashcard');
+            const sceneContainer = document.getElementById('scene-container');
+            const sidebar = document.getElementById('flashcards-sidebar');
+
+            let activeCard = null;
+            let selectedCardByKeyboard = null;
+            let offsetX = 0;
+            let offsetY = 0;
+            let highestZIndex = 100;
+
+            // Lưu vị trí tương đối (%) của các thẻ đã đặt trên bức tranh để giữ đúng vị trí khi xoay màn hình / resize
+            const placedPositions = new Map();
+
+            /**
+             * Đưa thẻ về lại ô chứa gốc bên thanh công cụ trái
+             */
+            function returnCardToSlot(card) {
+                const slot = card.parentElement;
+                card.classList.remove('placed', 'dragging');
+                card.style.position = '';
+                card.style.left = '';
+                card.style.top = '';
+                card.style.width = '';
+                card.style.height = '';
+                card.style.zIndex = '';
+                placedPositions.delete(card.id);
+                if (slot && slot.classList.contains('card-slot')) {
+                    slot.appendChild(card);
+                }
+            }
+
+            /**
+             * Cập nhật lại tọa độ tuyệt đối của các thẻ đã đặt trên tranh khi thay đổi kích thước cửa sổ
+             */
+            function syncPlacedCardsOnResize() {
+                const sceneRect = sceneContainer.getBoundingClientRect();
+                placedPositions.forEach((relPos, cardId) => {
+                    const card = document.getElementById(cardId);
+                    if (card && card.classList.contains('placed')) {
+                        const cardRect = card.getBoundingClientRect();
+                        const newLeft = sceneRect.left + relPos.rx * sceneRect.width - cardRect.width / 2;
+                        const newTop = sceneRect.top + relPos.ry * sceneRect.height - cardRect.height / 2;
+                        card.style.left = `${newLeft}px`;
+                        card.style.top = `${newTop}px`;
+                    }
+                });
+            }
+
+            window.addEventListener('resize', syncPlacedCardsOnResize);
+
+            /**
+             * Bắt đầu kéo thẻ bằng chuột hoặc cảm ứng (Pointer Events thống nhất cả hai)
+             */
+            function onPointerDown(e) {
+                // Chỉ nhận chuột trái hoặc chạm cảm ứng
+                if (e.pointerType === 'mouse' && e.button !== 0) return;
+
+                e.preventDefault();
+                const card = e.currentTarget;
+                activeCard = card;
+
+                const rect = card.getBoundingClientRect();
+                offsetX = e.clientX - rect.left;
+                offsetY = e.clientY - rect.top;
+
+                highestZIndex += 1;
+                card.style.zIndex = highestZIndex;
+
+                // Chuyển sang định vị cố định toàn màn hình để kéo mượt mọi nơi
+                card.classList.add('placed', 'dragging');
+                card.style.left = `${rect.left}px`;
+                card.style.top = `${rect.top}px`;
+
+                try {
+                    card.setPointerCapture(e.pointerId);
+                } catch (err) {
+                    // Bỏ qua nếu trình duyệt không hỗ trợ capture trên phần tử ảo
+                }
+            }
+
+            /**
+             * Di chuyển thẻ theo con trỏ chuột hoặc ngón tay
+             */
+            function onPointerMove(e) {
+                if (!activeCard) return;
+                e.preventDefault();
+
+                const newLeft = e.clientX - offsetX;
+                const newTop = e.clientY - offsetY;
+
+                // Giới hạn thẻ không bị kéo văng ra ngoài khung nhìn trình duyệt
+                const maxX = window.innerWidth - activeCard.offsetWidth;
+                const maxY = window.innerHeight - activeCard.offsetHeight;
+
+                const clampedLeft = Math.max(0, Math.min(newLeft, maxX));
+                const clampedTop = Math.max(0, Math.min(newTop, maxY));
+
+                activeCard.style.left = `${clampedLeft}px`;
+                activeCard.style.top = `${clampedTop}px`;
+            }
+
+            /**
+             * Kết thúc thao tác thả thẻ
+             */
+            function onPointerUp(e) {
+                if (!activeCard) return;
+
+                const card = activeCard;
+                activeCard = null;
+                card.classList.remove('dragging');
+
+                try {
+                    card.releasePointerCapture(e.pointerId);
+                } catch (err) {}
+
+                const cardRect = card.getBoundingClientRect();
+                const cardCenterX = cardRect.left + cardRect.width / 2;
+                const cardCenterY = cardRect.top + cardRect.height / 2;
+
+                const sceneRect = sceneContainer.getBoundingClientRect();
+
+                // Kiểm tra xem tâm thẻ có nằm trong vùng bức tranh chính hay không
+                const isInsideScene =
+                    cardCenterX >= sceneRect.left &&
+                    cardCenterX <= sceneRect.right &&
+                    cardCenterY >= sceneRect.top &&
+                    cardCenterY <= sceneRect.bottom;
+
+                if (isInsideScene) {
+                    // Giữ thẻ tại vị trí học sinh vừa thả và lưu tọa độ tương đối (%)
+                    const rx = (cardCenterX - sceneRect.left) / sceneRect.width;
+                    const ry = (cardCenterY - sceneRect.top) / sceneRect.height;
+                    placedPositions.set(card.id, { rx, ry });
+                } else {
+                    // Nếu thả ra ngoài bức tranh (về phía thanh bên trái hoặc mép ngoài), tự động thu gọn về ô gốc
+                    returnCardToSlot(card);
+                }
+            }
+
+            /**
+             * Hỗ trợ điều khiển bằng bàn phím (Accessibility & Keyboard Events):
+             * - Enter / Space: Chọn thẻ (nếu đang ở thanh trái thì đưa vào giữa tranh; nếu đang chọn thì xác nhận đặt)
+             * - Các phím mũi tên (ArrowUp, ArrowDown, ArrowLeft, ArrowRight): Di chuyển thẻ trên tranh
+             * - Escape / Backspace / Delete: Trả thẻ về vị trí ban đầu bên trái
+             */
+            function onKeyDown(e) {
+                const card = e.currentTarget;
+                const step = e.shiftKey ? 25 : 10;
+
+                if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault();
+                    if (!card.classList.contains('placed')) {
+                        const sceneRect = sceneContainer.getBoundingClientRect();
+                        highestZIndex += 1;
+                        card.style.zIndex = highestZIndex;
+                        card.classList.add('placed');
+
+                        const startLeft = sceneRect.left + sceneRect.width / 2 - card.offsetWidth / 2;
+                        const startTop = sceneRect.top + sceneRect.height / 2 - card.offsetHeight / 2;
+                        card.style.left = `${startLeft}px`;
+                        card.style.top = `${startTop}px`;
+
+                        placedPositions.set(card.id, { rx: 0.5, ry: 0.5 });
+                        selectedCardByKeyboard = card;
+                    } else {
+                        selectedCardByKeyboard = selectedCardByKeyboard === card ? null : card;
+                    }
+                    return;
+                }
+
+                if (e.key === 'Escape' || e.key === 'Backspace' || e.key === 'Delete') {
+                    e.preventDefault();
+                    returnCardToSlot(card);
+                    selectedCardByKeyboard = null;
+                    return;
+                }
+
+                if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(e.key)) {
+                    if (!card.classList.contains('placed')) return;
+                    e.preventDefault();
+
+                    const sceneRect = sceneContainer.getBoundingClientRect();
+                    const rect = card.getBoundingClientRect();
+                    let nextLeft = rect.left;
+                    let nextTop = rect.top;
+
+                    if (e.key === 'ArrowLeft') nextLeft -= step;
+                    if (e.key === 'ArrowRight') nextLeft += step;
+                    if (e.key === 'ArrowUp') nextTop -= step;
+                    if (e.key === 'ArrowDown') nextTop += step;
+
+                    // Giữ thẻ trong phạm vi bức tranh
+                    nextLeft = Math.max(sceneRect.left, Math.min(nextLeft, sceneRect.right - rect.width));
+                    nextTop = Math.max(sceneRect.top, Math.min(nextTop, sceneRect.bottom - rect.height));
+
+                    card.style.left = `${nextLeft}px`;
+                    card.style.top = `${nextTop}px`;
+
+                    const rx = (nextLeft + rect.width / 2 - sceneRect.left) / sceneRect.width;
+                    const ry = (nextTop + rect.height / 2 - sceneRect.top) / sceneRect.height;
+                    placedPositions.set(card.id, { rx, ry });
+                }
+            }
+
+            // Gắn sự kiện cho toàn bộ 8 flashcard
+            cards.forEach((card) => {
+                card.addEventListener('pointerdown', onPointerDown);
+                card.addEventListener('pointermove', onPointerMove);
+                card.addEventListener('pointerup', onPointerUp);
+                card.addEventListener('pointercancel', onPointerUp);
+                card.addEventListener('keydown', onKeyDown);
+
+                // Nhấp đúp (Double click) vào thẻ đã đặt trên tranh để thu hồi nhanh về ô gốc nếu muốn
+                card.addEventListener('dblclick', () => {
+                    if (card.classList.contains('placed')) {
+                        returnCardToSlot(card);
+                    }
+                });
+            });
+        })();
+    </script>
+</body>
+</html>
